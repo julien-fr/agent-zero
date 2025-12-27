@@ -9,15 +9,56 @@ from agent import Agent, UserMessage
 from initialize import initialize_agent
 from python.helpers.tool import Tool, Response
 from python.helpers import files, images, runtime, history
+from python.tools.imagen_generate import ImagenGenerate
 
 class UiUxArchitect(Tool):
-    async def execute(self, target: str, instruction: str = "", **kwargs):
+    async def execute(self, target: str = "", instruction: str = "", generate_prompt: str = "", **kwargs):
 
         # 1. Acquire Image
         image_path = target
         temp_file = False
 
-        if target.startswith("http://") or target.startswith("https://"):
+        # If generate_prompt is provided, generate an image first
+        if generate_prompt:
+            self.agent.context.log.set_progress(f"Generating image from prompt: {generate_prompt}")
+            image_path = files.get_abs_path(f"tmp/ui_ux_generated_{self.agent.context.generate_id()}.png")
+            temp_file = True
+
+            # Use imagen_generate tool via the agent's tool execution
+            try:
+                # Prepare tool arguments
+                tool_args = {
+                    "prompt": generate_prompt,
+                    "number_of_images": 1,
+                    "aspect_ratio": "1:1",
+                    "model": "imagen-4.0-fast-generate-001",
+                    "output_dir": "/a0/tmp/generated_images",
+                    "display_image": False
+                }
+                # Execute the tool using the agent's context tool manager
+                from python.helpers.tool import Response as ToolResponse
+                from python.tools.imagen_generate import ImagenGenerate
+                # Create a proper Tool instance with required parameters
+                imagen_tool = ImagenGenerate(
+                    agent=self.agent,
+                    name="imagen_generate",
+                    method=None,
+                    args=tool_args,
+                    message="",
+                    loop_data=None
+                )
+                result = await imagen_tool.execute(**tool_args)
+                # The result's additional dict contains saved_files list
+                saved_files = result.additional.get("saved_files", [])
+                if not saved_files:
+                    return Response(message="Image generation failed: no file saved", break_loop=False)
+                # Move the generated file to our desired location
+                import shutil
+                shutil.move(saved_files[0], image_path)
+            except Exception as e:
+                return Response(message=f"Error generating image: {e}", break_loop=False)
+
+        elif target.startswith("http://") or target.startswith("https://"):
             self.agent.context.log.set_progress(f"Capturing screenshot of {target}...")
             image_path = files.get_abs_path(f"tmp/ui_ux_{self.agent.context.generate_id()}.png")
             temp_file = True
